@@ -4,9 +4,9 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="theme-color" content="#0b1020" />
-  <title>Stand & Answer - Camera AI Quiz</title>
+  <title>カメラAI立ち位置クイズ</title>
   <link rel="stylesheet" href="styles.css" />
-  <script type="module" src="app.js"></script>
+  <script type="module" src="main.js?v=2"></script>
 </head>
 <body>
   <main class="app-shell">
@@ -34,8 +34,8 @@
         </div>
 
         <div id="gameStep" class="setup-step start-step">
-          <p class="eyebrow">CAMERA AI QUIZ</p>
-          <h1 id="setupTitle">Stand & Answer</h1>
+          <p class="eyebrow">カメラAIクイズ</p>
+          <h1 id="setupTitle">立ち位置で答えよう</h1>
           <p>立つ場所を選んで回答する、カメラを使ったAIクイズです。</p>
           <div class="game-settings-grid">
             <label for="questionCountInput">
@@ -103,7 +103,7 @@
       </section>
 
       <section id="endScreen" class="end-screen" aria-labelledby="endTitle" hidden>
-        <p class="eyebrow">QUIZ COMPLETE</p>
+        <p class="eyebrow">クイズ終了</p>
         <h1 id="endTitle">おつかれさまでした！</h1>
         <div class="final-score"><strong id="finalScore">0</strong><span id="finalMaxScore">/ 0 pt</span></div>
         <p id="finalCorrectCount">0問中0問正解</p>
