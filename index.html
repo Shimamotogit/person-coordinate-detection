@@ -14,31 +14,83 @@
   <main class="app-shell">
     <section class="stage" aria-label="カメラ映像と回答エリア">
       <video id="camera" autoplay playsinline muted></video>
-      <canvas id="overlay"></canvas>
+      <canvas id="overlay" aria-label="参加者選択と追跡表示"></canvas>
 
-      <header class="question-card" aria-live="polite">
+      <header id="questionCard" class="question-card" aria-live="polite" hidden>
         <div class="question-meta">
           <span id="questionCounter">0 / 0</span>
           <span id="statusText">準備中</span>
         </div>
-        <h1 id="questionText">カメラを開始してください</h1>
+        <h1 id="questionText">クイズを開始してください</h1>
       </header>
 
-      <div id="choiceLabels" class="choice-labels" aria-label="回答の選択肢"></div>
+      <div id="choiceLabels" class="choice-labels" aria-label="回答の選択肢" hidden></div>
 
-      <div class="controls">
-        <button id="startButton" class="primary-button" type="button">カメラを開始</button>
+      <section id="setupPanel" class="setup-panel" aria-labelledby="setupTitle">
+        <div class="step-indicator" aria-label="設定手順">
+          <span data-step="camera" class="active">1 カメラ</span>
+          <span data-step="participant">2 参加者</span>
+          <span data-step="answer">3 回答方法</span>
+        </div>
+
+        <div id="cameraStep" class="setup-step">
+          <h1 id="setupTitle">使用するカメラを選択</h1>
+          <p>カメラ一覧を取得し、使用するカメラを選んで「このカメラに決定」を押してください。</p>
+          <div class="form-row">
+            <button id="scanCamerasButton" class="secondary-button" type="button">カメラ一覧を取得</button>
+            <select id="cameraSelect" aria-label="使用するカメラ" disabled>
+              <option value="">カメラを選択してください</option>
+            </select>
+            <button id="confirmCameraButton" class="primary-button" type="button" disabled>このカメラに決定</button>
+          </div>
+          <p id="cameraStatus" class="setup-status">最初にブラウザのカメラ利用を許可してください。</p>
+        </div>
+
+        <div id="participantStep" class="setup-step" hidden>
+          <h1>参加者を登録</h1>
+          <p>画面上の丸い番号をクリックし、「この人を参加者に決定」を押してください。矩形は表示しません。</p>
+          <div class="form-row">
+            <button id="confirmParticipantButton" class="primary-button" type="button" disabled>この人を参加者に決定</button>
+            <button id="backToCameraButton" class="secondary-button" type="button">カメラを選び直す</button>
+          </div>
+          <p id="participantStatus" class="setup-status">人物を検出しています…</p>
+        </div>
+
+        <div id="answerStep" class="setup-step" hidden>
+          <h1>回答の確定方法</h1>
+          <label class="mode-option">
+            <input type="radio" name="answerMode" value="timer" checked />
+            <span><strong>時間で確定</strong><small>同じ回答エリアに一定時間立つと確定します。</small></span>
+          </label>
+          <label class="mode-option">
+            <input type="radio" name="answerMode" value="space" />
+            <span><strong>管理者がスペースで確定</strong><small>スペース押下後、3秒カウントダウン終了時の位置で確定します。</small></span>
+          </label>
+          <label class="duration-field" for="holdDurationInput">
+            時間確定までの秒数
+            <input id="holdDurationInput" type="number" min="0.5" max="10" step="0.1" value="1.2" />
+          </label>
+          <div class="form-row">
+            <button id="startQuizButton" class="primary-button" type="button">クイズを開始</button>
+            <button id="backToParticipantButton" class="secondary-button" type="button">参加者を選び直す</button>
+          </div>
+        </div>
+      </section>
+
+      <div class="controls" id="quizControls" hidden>
+        <button id="reselectParticipantButton" class="secondary-button" type="button">参加者を再登録</button>
         <button id="nextButton" class="secondary-button" type="button" hidden>次の問題</button>
         <button id="resetButton" class="secondary-button" type="button">スコアをリセット</button>
       </div>
 
       <div id="message" class="message" role="status" aria-live="assertive"></div>
+      <div id="countdown" class="countdown" aria-live="assertive" hidden></div>
     </section>
 
     <aside class="help-panel">
       <h2>遊び方</h2>
-      <p>選択肢のエリアへ移動し、足元を約1.2秒止めると回答が確定します。</p>
-      <p>人物の頭上に現在のポイントが表示されます。</p>
+      <p>最初にカメラと参加者を登録します。クイズ中は登録した1人だけを追跡・採点します。</p>
+      <p>背後に別の人物が写っても、自動でその人物へ切り替えません。登録者を見失った場合は再登録を求めます。</p>
       <p class="privacy-note">映像はブラウザ内だけで処理され、サーバーには送信しません。</p>
     </aside>
   </main>
