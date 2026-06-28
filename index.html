@@ -6,19 +6,18 @@
   <meta name="theme-color" content="#0b1020" />
   <title>Stand & Answer - Camera AI Quiz</title>
   <link rel="stylesheet" href="styles.css" />
-  <script defer src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js"></script>
-  <script defer src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.3/dist/coco-ssd.min.js"></script>
-  <script defer src="app.js"></script>
+  <script type="module" src="app.js"></script>
 </head>
 <body>
   <main class="app-shell">
-    <section class="stage" aria-label="カメラ映像と回答エリア">
+    <section id="stage" class="stage" aria-label="カメラ映像とクイズ画面">
       <video id="camera" autoplay playsinline muted></video>
       <canvas id="overlay" aria-label="参加者選択と追跡表示"></canvas>
 
       <header id="questionCard" class="question-card" aria-live="polite" hidden>
         <div class="question-meta">
           <span id="questionCounter">0 / 0</span>
+          <span id="scoreSummary">0 / 0 pt</span>
           <span id="statusText">準備中</span>
         </div>
         <h1 id="questionText">クイズを開始してください</h1>
@@ -28,14 +27,37 @@
 
       <section id="setupPanel" class="setup-panel" aria-labelledby="setupTitle">
         <div class="step-indicator" aria-label="設定手順">
-          <span data-step="camera" class="active">1 カメラ</span>
-          <span data-step="participant">2 参加者</span>
-          <span data-step="answer">3 回答方法</span>
+          <span data-step="game" class="active">1 ゲーム</span>
+          <span data-step="camera">2 カメラ</span>
+          <span data-step="participant">3 参加者</span>
+          <span data-step="answer">4 回答</span>
         </div>
 
-        <div id="cameraStep" class="setup-step">
-          <h1 id="setupTitle">使用するカメラを選択</h1>
-          <p>カメラ一覧を取得し、使用するカメラを選んで「このカメラに決定」を押してください。</p>
+        <div id="gameStep" class="setup-step start-step">
+          <p class="eyebrow">CAMERA AI QUIZ</p>
+          <h1 id="setupTitle">Stand & Answer</h1>
+          <p>立つ場所を選んで回答する、カメラを使ったAIクイズです。</p>
+          <div class="game-settings-grid">
+            <label for="questionCountInput">
+              <span>出題する問題数</span>
+              <input id="questionCountInput" type="number" min="1" value="5" inputmode="numeric" />
+              <small id="questionCountHelp">問題データを読み込み中…</small>
+            </label>
+            <label for="maxScoreInput">
+              <span>最大点数</span>
+              <input id="maxScoreInput" type="number" min="1" max="100000" value="500" inputmode="numeric" />
+              <small>全問正解したときの合計点です。</small>
+            </label>
+          </div>
+          <p id="gameSettingsStatus" class="setup-status"></p>
+          <div class="form-row centered-row">
+            <button id="confirmGameButton" class="primary-button large-button" type="button" disabled>設定して次へ</button>
+          </div>
+        </div>
+
+        <div id="cameraStep" class="setup-step" hidden>
+          <h1>使用するカメラを選択</h1>
+          <p>カメラ一覧を取得し、使用するカメラを選んで確定してください。</p>
           <div class="form-row">
             <button id="scanCamerasButton" class="secondary-button" type="button">カメラ一覧を取得</button>
             <select id="cameraSelect" aria-label="使用するカメラ" disabled>
@@ -43,17 +65,20 @@
             </select>
             <button id="confirmCameraButton" class="primary-button" type="button" disabled>このカメラに決定</button>
           </div>
-          <p id="cameraStatus" class="setup-status">最初にブラウザのカメラ利用を許可してください。</p>
+          <p id="cameraStatus" class="setup-status">ブラウザのカメラ利用を許可してください。</p>
+          <div class="form-row">
+            <button id="backToGameButton" class="secondary-button" type="button">ゲーム設定へ戻る</button>
+          </div>
         </div>
 
         <div id="participantStep" class="setup-step" hidden>
           <h1>参加者を登録</h1>
-          <p>画面上の丸い番号をクリックし、「この人を参加者に決定」を押してください。矩形は表示しません。</p>
+          <p>画面上の丸い番号をクリックし、参加者を確定してください。矩形は表示しません。</p>
           <div class="form-row">
             <button id="confirmParticipantButton" class="primary-button" type="button" disabled>この人を参加者に決定</button>
             <button id="backToCameraButton" class="secondary-button" type="button">カメラを選び直す</button>
           </div>
-          <p id="participantStatus" class="setup-status">人物を検出しています…</p>
+          <p id="participantStatus" class="setup-status">姿勢を検出しています…</p>
         </div>
 
         <div id="answerStep" class="setup-step" hidden>
@@ -77,20 +102,32 @@
         </div>
       </section>
 
+      <section id="endScreen" class="end-screen" aria-labelledby="endTitle" hidden>
+        <p class="eyebrow">QUIZ COMPLETE</p>
+        <h1 id="endTitle">おつかれさまでした！</h1>
+        <div class="final-score"><strong id="finalScore">0</strong><span id="finalMaxScore">/ 0 pt</span></div>
+        <p id="finalCorrectCount">0問中0問正解</p>
+        <div class="form-row centered-row">
+          <button id="restartButton" class="primary-button large-button" type="button">同じ設定でもう一度</button>
+          <button id="returnToStartButton" class="secondary-button" type="button">スタート画面へ</button>
+        </div>
+      </section>
+
       <div class="controls" id="quizControls" hidden>
+        <button id="fullscreenButton" class="secondary-button" type="button">全画面表示</button>
         <button id="reselectParticipantButton" class="secondary-button" type="button">参加者を再登録</button>
         <button id="nextButton" class="secondary-button" type="button" hidden>次の問題</button>
-        <button id="resetButton" class="secondary-button" type="button">スコアをリセット</button>
+        <button id="finishGameButton" class="secondary-button danger-button" type="button">ゲームを終了</button>
       </div>
 
       <div id="message" class="message" role="status" aria-live="assertive"></div>
       <div id="countdown" class="countdown" aria-live="assertive" hidden></div>
     </section>
 
-    <aside class="help-panel">
+    <aside id="helpPanel" class="help-panel">
       <h2>遊び方</h2>
-      <p>最初にカメラと参加者を登録します。クイズ中は登録した1人だけを追跡・採点します。</p>
-      <p>背後に別の人物が写っても、自動でその人物へ切り替えません。登録者を見失った場合は再登録を求めます。</p>
+      <p>開始画面で出題数と最大点を決め、カメラ・参加者・回答方法を設定します。</p>
+      <p>クイズ中は登録した1人だけをPose Landmarkerで追跡・採点します。全画面表示ではこの説明欄は表示されません。</p>
       <p class="privacy-note">映像はブラウザ内だけで処理され、サーバーには送信しません。</p>
     </aside>
   </main>
