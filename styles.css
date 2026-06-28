@@ -40,10 +40,13 @@ button { font: inherit; }
   width: 100%;
   height: 100%;
   object-fit: cover;
+}
+
+#camera {
+  opacity: 0.92;
   transform: scaleX(-1);
 }
 
-#camera { opacity: 0.92; }
 #overlay { pointer-events: none; }
 
 .question-card {
