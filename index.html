@@ -4,9 +4,15 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="theme-color" content="#0b1020" />
+  <meta name="referrer" content="no-referrer" />
+  <meta
+    http-equiv="Content-Security-Policy"
+    content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net 'wasm-unsafe-eval'; style-src 'self'; connect-src 'self' https://cdn.jsdelivr.net https://storage.googleapis.com; img-src 'self' data: blob:; media-src 'self' blob:; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'; manifest-src 'self'"
+  />
   <title>カメラAI立ち位置クイズ</title>
   <link rel="stylesheet" href="styles.css" />
-  <script type="module" src="main.js?v=2"></script>
+  <link rel="stylesheet" href="question-source.css" />
+  <script type="module" src="main.js?v=3"></script>
 </head>
 <body>
   <main class="app-shell">
@@ -37,6 +43,25 @@
           <p class="eyebrow">カメラAIクイズ</p>
           <h1 id="setupTitle">立ち位置で答えよう</h1>
           <p>立つ場所を選んで回答する、カメラを使ったAIクイズです。</p>
+
+          <section class="question-source-panel" aria-labelledby="questionSourceTitle">
+            <h2 id="questionSourceTitle">問題ファイル</h2>
+            <p>JSONファイルを選択できます。選択しない場合はサンプル問題を使用します。</p>
+            <div class="form-row centered-row">
+              <input
+                id="questionFileInput"
+                class="question-file-input"
+                type="file"
+                accept=".json,application/json"
+                aria-label="JSONファイルを選択"
+                aria-describedby="questionSourceStatus questionSourcePrivacy"
+              />
+              <button id="useSampleQuestionsButton" class="secondary-button" type="button">サンプル問題に戻す</button>
+            </div>
+            <p id="questionSourceStatus" class="setup-status" role="status" aria-live="polite">問題データを確認中…</p>
+            <p id="questionSourcePrivacy" class="local-only-note">選択したJSONはブラウザ内でのみ検証・保存・利用し、サーバーへ送信しません。</p>
+          </section>
+
           <div class="game-settings-grid">
             <label for="questionCountInput">
               <span>出題する問題数</span>
@@ -126,9 +151,9 @@
 
     <aside id="helpPanel" class="help-panel">
       <h2>遊び方</h2>
-      <p>開始画面で出題数と最大点を決め、カメラ・参加者・回答方法を設定します。</p>
+      <p>開始画面で問題ファイル、出題数、最大点を決め、カメラ・参加者・回答方法を設定します。</p>
       <p>クイズ中は登録した1人だけを高精度人物検出モデルで追跡・採点します。上半身だけでも動作します。</p>
-      <p class="privacy-note">映像はブラウザ内だけで処理され、サーバーには送信しません。</p>
+      <p class="privacy-note">映像と選択したJSONはブラウザ内だけで処理され、サーバーには送信しません。</p>
     </aside>
   </main>
 </body>
