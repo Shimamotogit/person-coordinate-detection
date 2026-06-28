@@ -1,13 +1,10 @@
 import {
   FilesetResolver,
-  PoseLandmarker
+  ObjectDetector
 } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.35/+esm";
 
-const MODEL_URL = "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_full/float16/1/pose_landmarker_full.task";
+const MODEL_URL = "https://storage.googleapis.com/mediapipe-models/object_detector/efficientdet_lite2/int8/1/efficientdet_lite2.tflite";
 const WASM_URL = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.35/wasm";
-const CORE_LANDMARKS = [0, 11, 12, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32];
-const FOOT_LANDMARKS = [27, 28, 29, 30, 31, 32];
-const HEAD_LANDMARKS = [0, 1, 2, 3, 4, 5, 6, 7, 8];
 
 const elements = {
   stage: document.querySelector("#stage"),
@@ -57,16 +54,20 @@ const elements = {
 };
 
 const context = elements.canvas.getContext("2d");
+const appearanceCanvas = document.createElement("canvas");
+appearanceCanvas.width = 32;
+appearanceCanvas.height = 48;
+const appearanceContext = appearanceCanvas.getContext("2d", { willReadFrequently: true });
 
 const state = {
   phase: "game",
-  poseLandmarker: null,
+  objectDetector: null,
   stream: null,
   running: false,
   animationFrameId: null,
   lastVideoTime: -1,
   lastDetectionAt: 0,
-  detectionIntervalMs: 85,
+  detectionIntervalMs: 95,
   tracks: new Map(),
   nextTrackId: 1,
   markerHitAreas: [],
@@ -99,6 +100,7 @@ const state = {
   currentZone: null,
   zoneEnteredAt: 0,
   answerLocked: false,
+  awaitingNext: false,
   resultTimerId: null,
   messageTimerId: null,
   countdownTimerId: null,
@@ -117,7 +119,6 @@ function shuffle(values) {
 async function loadQuestions() {
   const response = await fetch("questions.json", { cache: "no-store" });
   if (!response.ok) throw new Error(`questions.json の読み込みに失敗しました (${response.status})`);
-
   const data = await response.json();
   if (!Array.isArray(data.questions) || data.questions.length === 0) {
     throw new Error("questions.json に問題がありません");
@@ -142,7 +143,6 @@ async function loadQuestions() {
   elements.maxScoreInput.min = String(defaultCount);
   elements.holdDurationInput.value = String(state.settings.holdDurationMs / 1000);
   elements.questionCountHelp.textContent = `1〜${state.questions.length}問から選択できます。`;
-  elements.confirmGameButton.disabled = false;
   validateGameSettings();
 }
 
@@ -164,14 +164,13 @@ function validateGameSettings() {
   const maxScore = Number(elements.maxScoreInput.value);
   const validCount = Number.isInteger(questionCount) && questionCount >= 1 && questionCount <= state.questions.length;
   const validScore = Number.isInteger(maxScore) && maxScore >= questionCount && maxScore <= 100000;
-
   elements.maxScoreInput.min = validCount ? String(questionCount) : "1";
   elements.confirmGameButton.disabled = !(validCount && validScore && state.questions.length > 0);
 
   if (!validCount && state.questions.length > 0) {
     elements.gameSettingsStatus.textContent = `問題数は1〜${state.questions.length}の整数で指定してください。`;
   } else if (!validScore) {
-    elements.gameSettingsStatus.textContent = `最大点数は問題数以上、100000以下の整数で指定してください。`;
+    elements.gameSettingsStatus.textContent = "最大点数は問題数以上、100000以下の整数で指定してください。";
   } else {
     const base = Math.floor(maxScore / questionCount);
     const remainder = maxScore % questionCount;
@@ -179,7 +178,6 @@ function validateGameSettings() {
       ? `1問あたり${base}点、全問正解で${maxScore}点です。`
       : `各問題へ${base}〜${base + 1}点を配分し、全問正解で${maxScore}点にします。`;
   }
-
   return validCount && validScore;
 }
 
@@ -200,18 +198,15 @@ function distributePoints(maxScore, questionCount) {
 async function scanCameras() {
   elements.scanCamerasButton.disabled = true;
   elements.cameraStatus.textContent = "カメラへのアクセス許可を確認しています…";
-
   try {
     const permissionStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
     permissionStream.getTracks().forEach((track) => track.stop());
-
     const devices = await navigator.mediaDevices.enumerateDevices();
     const cameras = devices.filter((device) => device.kind === "videoinput");
     elements.cameraSelect.replaceChildren(new Option("カメラを選択してください", ""));
     cameras.forEach((camera, index) => {
       elements.cameraSelect.add(new Option(camera.label || `カメラ ${index + 1}`, camera.deviceId));
     });
-
     elements.cameraSelect.disabled = cameras.length === 0;
     elements.confirmCameraButton.disabled = true;
     elements.cameraStatus.textContent = cameras.length > 0
@@ -243,42 +238,35 @@ async function startSelectedCamera(deviceId) {
   resizeCanvas();
 }
 
-async function createPoseLandmarker(delegate) {
+async function createObjectDetector(delegate) {
   const vision = await FilesetResolver.forVisionTasks(WASM_URL);
-  return PoseLandmarker.createFromOptions(vision, {
-    baseOptions: {
-      modelAssetPath: MODEL_URL,
-      delegate
-    },
+  return ObjectDetector.createFromOptions(vision, {
+    baseOptions: { modelAssetPath: MODEL_URL, delegate },
     runningMode: "VIDEO",
-    numPoses: 6,
-    minPoseDetectionConfidence: 0.35,
-    minPosePresenceConfidence: 0.35,
-    minTrackingConfidence: 0.35,
-    outputSegmentationMasks: false
+    maxResults: 8,
+    scoreThreshold: 0.32,
+    categoryAllowlist: ["person"]
   });
 }
 
-async function ensurePoseLandmarker() {
-  if (state.poseLandmarker) return;
+async function ensureObjectDetector() {
+  if (state.objectDetector) return;
   try {
-    state.poseLandmarker = await createPoseLandmarker("GPU");
+    state.objectDetector = await createObjectDetector("GPU");
   } catch (gpuError) {
     console.warn("GPU delegate unavailable; falling back to CPU", gpuError);
-    state.poseLandmarker = await createPoseLandmarker("CPU");
+    state.objectDetector = await createObjectDetector("CPU");
   }
 }
 
 async function confirmCamera() {
   const deviceId = elements.cameraSelect.value;
   if (!deviceId) return;
-
   elements.confirmCameraButton.disabled = true;
-  elements.cameraStatus.textContent = "選択したカメラと高精度姿勢モデルを準備しています…";
-
+  elements.cameraStatus.textContent = "選択したカメラと高精度人物検出モデルを準備しています…";
   try {
     await startSelectedCamera(deviceId);
-    await ensurePoseLandmarker();
+    await ensureObjectDetector();
     if (!state.running) {
       state.running = true;
       state.animationFrameId = requestAnimationFrame(detectionLoop);
@@ -299,10 +287,11 @@ function beginParticipantSelection(resumeAfterRegistration) {
   state.currentZone = null;
   state.zoneEnteredAt = 0;
   state.answerLocked = true;
+  state.awaitingNext = false;
   state.lostPrompted = false;
   cancelCountdown();
   elements.confirmParticipantButton.disabled = true;
-  elements.participantStatus.textContent = "姿勢を検出しています。表示された丸い番号をクリックしてください。";
+  elements.participantStatus.textContent = "人物を検出しています。表示された丸い番号をクリックしてください。";
   elements.questionCard.hidden = true;
   elements.choiceLabels.hidden = true;
   elements.quizControls.hidden = true;
@@ -311,18 +300,17 @@ function beginParticipantSelection(resumeAfterRegistration) {
 
 function confirmParticipant() {
   const track = state.tracks.get(state.selectedCandidateId);
-  if (!track || performance.now() - track.lastSeen > 1000) {
+  if (!track || performance.now() - track.lastSeen > 1100) {
     elements.participantStatus.textContent = "選択した人物を確認できません。もう一度番号を選んでください。";
     state.selectedCandidateId = null;
     elements.confirmParticipantButton.disabled = true;
     return;
   }
-
   state.participantTrackId = track.id;
   state.participantProfile = {
-    descriptor: [...track.descriptor],
-    scale: track.scale,
-    bodyHeight: track.bodyHeight
+    appearance: [...track.appearance],
+    aspectRatio: track.box.width / Math.max(1, track.box.height),
+    area: track.box.width * track.box.height
   };
   state.lostPrompted = false;
 
@@ -360,6 +348,7 @@ function startNewGame() {
   state.orderPosition = 0;
   state.currentQuestion = null;
   state.currentQuestionPoints = 0;
+  state.awaitingNext = false;
   state.phase = "quiz";
   elements.setupPanel.hidden = true;
   elements.endScreen.hidden = true;
@@ -376,6 +365,7 @@ function showQuestion() {
   }
   cancelCountdown();
   hideMessage();
+  state.awaitingNext = false;
 
   if (state.game.answeredCount >= state.game.questionCount || state.orderPosition >= state.order.length) {
     showEndScreen();
@@ -440,148 +430,127 @@ function getVideoTransform() {
   const scale = Math.max(target.width / sourceWidth, target.height / sourceHeight);
   return {
     target,
+    sourceWidth,
+    sourceHeight,
+    scale,
     renderedWidth: sourceWidth * scale,
     renderedHeight: sourceHeight * scale,
-    scale,
     cropX: (sourceWidth * scale - target.width) / 2,
     cropY: (sourceHeight * scale - target.height) / 2
   };
 }
 
-function landmarkToDisplay(landmark, transform) {
+function detectionToCandidate(detection, transform) {
+  const boundingBox = detection.boundingBox;
+  const category = detection.categories?.[0];
+  if (!boundingBox || !category) return null;
+  const sourceBox = {
+    x: Math.max(0, boundingBox.originX),
+    y: Math.max(0, boundingBox.originY),
+    width: Math.min(transform.sourceWidth - Math.max(0, boundingBox.originX), boundingBox.width),
+    height: Math.min(transform.sourceHeight - Math.max(0, boundingBox.originY), boundingBox.height)
+  };
+  if (sourceBox.width < 12 || sourceBox.height < 20) return null;
+
+  const box = {
+    x: transform.target.width - (sourceBox.x * transform.scale - transform.cropX) - sourceBox.width * transform.scale,
+    y: sourceBox.y * transform.scale - transform.cropY,
+    width: sourceBox.width * transform.scale,
+    height: sourceBox.height * transform.scale
+  };
+  const center = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
   return {
-    x: transform.target.width - (landmark.x * transform.renderedWidth - transform.cropX),
-    y: landmark.y * transform.renderedHeight - transform.cropY,
-    visibility: landmark.visibility ?? 1,
-    presence: landmark.presence ?? 1
+    box,
+    sourceBox,
+    center,
+    head: { x: center.x, y: Math.max(8, box.y) },
+    answerPoint: { x: center.x, y: Math.min(transform.target.height - 8, box.y + box.height) },
+    score: category.score ?? 0,
+    appearance: extractAppearance(sourceBox),
+    lastSeen: performance.now()
   };
 }
 
-function isVisible(landmark, threshold = 0.25) {
-  return Boolean(landmark) && (landmark.visibility ?? 1) >= threshold && (landmark.presence ?? 1) >= threshold;
+function extractAppearance(sourceBox) {
+  try {
+    appearanceContext.clearRect(0, 0, appearanceCanvas.width, appearanceCanvas.height);
+    appearanceContext.drawImage(
+      elements.video,
+      sourceBox.x,
+      sourceBox.y,
+      sourceBox.width,
+      sourceBox.height,
+      0,
+      0,
+      appearanceCanvas.width,
+      appearanceCanvas.height
+    );
+    const pixels = appearanceContext.getImageData(0, 0, appearanceCanvas.width, appearanceCanvas.height).data;
+    const descriptor = [];
+    const columns = 4;
+    const rows = 4;
+    const cellWidth = appearanceCanvas.width / columns;
+    const cellHeight = appearanceCanvas.height / rows;
+    for (let row = 0; row < rows; row += 1) {
+      for (let column = 0; column < columns; column += 1) {
+        let red = 0;
+        let green = 0;
+        let blue = 0;
+        let count = 0;
+        const startX = Math.floor(column * cellWidth);
+        const endX = Math.floor((column + 1) * cellWidth);
+        const startY = Math.floor(row * cellHeight);
+        const endY = Math.floor((row + 1) * cellHeight);
+        for (let y = startY; y < endY; y += 2) {
+          for (let x = startX; x < endX; x += 2) {
+            const offset = (y * appearanceCanvas.width + x) * 4;
+            red += pixels[offset];
+            green += pixels[offset + 1];
+            blue += pixels[offset + 2];
+            count += 1;
+          }
+        }
+        descriptor.push(red / Math.max(1, count) / 255, green / Math.max(1, count) / 255, blue / Math.max(1, count) / 255);
+      }
+    }
+    return descriptor;
+  } catch (error) {
+    console.warn("Appearance extraction failed", error);
+    return [];
+  }
 }
 
-function averagePoints(points) {
-  if (points.length === 0) return { x: 0, y: 0 };
-  const total = points.reduce(
-    (sum, point) => ({ x: sum.x + point.x, y: sum.y + point.y }),
-    { x: 0, y: 0 }
-  );
-  return { x: total.x / points.length, y: total.y / points.length };
-}
-
-function distance2(a, b) {
+function distance(a, b) {
   return Math.hypot(a.x - b.x, a.y - b.y);
 }
 
-function distance3(a, b) {
-  return Math.hypot(a.x - b.x, a.y - b.y, (a.z ?? 0) - (b.z ?? 0));
+function intersectionOverUnion(a, b) {
+  const left = Math.max(a.x, b.x);
+  const top = Math.max(a.y, b.y);
+  const right = Math.min(a.x + a.width, b.x + b.width);
+  const bottom = Math.min(a.y + a.height, b.y + b.height);
+  const intersection = Math.max(0, right - left) * Math.max(0, bottom - top);
+  const union = a.width * a.height + b.width * b.height - intersection;
+  return union > 0 ? intersection / union : 0;
 }
 
-function makeDescriptor(worldLandmarks) {
-  if (!worldLandmarks || worldLandmarks.length < 33) return [];
-  const shoulderCenter = midpoint3(worldLandmarks[11], worldLandmarks[12]);
-  const hipCenter = midpoint3(worldLandmarks[23], worldLandmarks[24]);
-  const torso = Math.max(0.001, distance3(shoulderCenter, hipCenter));
-  return [
-    distance3(worldLandmarks[11], worldLandmarks[12]) / torso,
-    distance3(worldLandmarks[23], worldLandmarks[24]) / torso,
-    distance3(worldLandmarks[11], worldLandmarks[13]) / torso,
-    distance3(worldLandmarks[12], worldLandmarks[14]) / torso,
-    distance3(worldLandmarks[13], worldLandmarks[15]) / torso,
-    distance3(worldLandmarks[14], worldLandmarks[16]) / torso,
-    distance3(worldLandmarks[23], worldLandmarks[25]) / torso,
-    distance3(worldLandmarks[24], worldLandmarks[26]) / torso,
-    distance3(worldLandmarks[25], worldLandmarks[27]) / torso,
-    distance3(worldLandmarks[26], worldLandmarks[28]) / torso
-  ].map((value) => Number.isFinite(value) ? value : 0);
-}
-
-function midpoint3(a, b) {
-  return {
-    x: (a.x + b.x) / 2,
-    y: (a.y + b.y) / 2,
-    z: ((a.z ?? 0) + (b.z ?? 0)) / 2
-  };
-}
-
-function descriptorDistance(a, b) {
+function appearanceDistance(a, b) {
   if (!a?.length || !b?.length || a.length !== b.length) return 0.45;
   const meanSquare = a.reduce((sum, value, index) => sum + (value - b[index]) ** 2, 0) / a.length;
   return Math.sqrt(meanSquare);
 }
 
-function poseFromLandmarks(landmarks, worldLandmarks, transform) {
-  if (!landmarks || landmarks.length < 33) return null;
-  const display = landmarks.map((landmark) => landmarkToDisplay(landmark, transform));
-  const visibleCore = CORE_LANDMARKS.map((index) => display[index]).filter((point) => isVisible(point));
-  if (visibleCore.length < 5) return null;
-
-  const shoulders = [display[11], display[12]].filter((point) => isVisible(point));
-  const hips = [display[23], display[24]].filter((point) => isVisible(point));
-  const centerPoints = [...shoulders, ...hips];
-  const center = averagePoints(centerPoints.length >= 2 ? centerPoints : visibleCore);
-
-  const visibleFeet = FOOT_LANDMARKS.map((index) => display[index]).filter((point) => isVisible(point, 0.18));
-  const footCandidates = visibleFeet.length > 0 ? visibleFeet : visibleCore;
-  const lowestY = Math.max(...footCandidates.map((point) => point.y));
-  const nearLowest = footCandidates.filter((point) => point.y >= lowestY - 35);
-  const foot = { x: averagePoints(nearLowest).x, y: lowestY };
-
-  const visibleHead = HEAD_LANDMARKS.map((index) => display[index]).filter((point) => isVisible(point, 0.18));
-  const head = visibleHead.length > 0
-    ? { x: averagePoints(visibleHead).x, y: Math.min(...visibleHead.map((point) => point.y)) }
-    : { x: center.x, y: Math.min(...visibleCore.map((point) => point.y)) };
-
-  const xs = visibleCore.map((point) => point.x);
-  const ys = visibleCore.map((point) => point.y);
-  const width = Math.max(30, Math.max(...xs) - Math.min(...xs));
-  const bodyHeight = Math.max(80, foot.y - head.y);
-  const shoulderWidth = shoulders.length === 2 ? distance2(shoulders[0], shoulders[1]) : width;
-  const hipWidth = hips.length === 2 ? distance2(hips[0], hips[1]) : width * 0.7;
-  const scale = Math.max(40, (shoulderWidth + hipWidth + bodyHeight * 0.35) / 3);
-  const quality = visibleCore.reduce((sum, point) => sum + Math.min(point.visibility, point.presence), 0) / visibleCore.length;
-
-  return {
-    center,
-    foot,
-    head,
-    width,
-    bodyHeight,
-    scale,
-    descriptor: makeDescriptor(worldLandmarks),
-    quality,
-    landmarks: display,
-    lastSeen: performance.now()
-  };
-}
-
-function updateTrack(track, pose, now) {
-  const dt = Math.max(16, now - track.lastSeen);
-  const measuredVelocity = {
-    x: (pose.center.x - track.center.x) / dt,
-    y: (pose.center.y - track.center.y) / dt
-  };
-  const alpha = 0.58;
-  track.velocity = {
-    x: track.velocity.x * 0.55 + measuredVelocity.x * 0.45,
-    y: track.velocity.y * 0.55 + measuredVelocity.y * 0.45
-  };
-  track.center = blendPoint(track.center, pose.center, alpha);
-  track.foot = blendPoint(track.foot, pose.foot, alpha);
-  track.head = blendPoint(track.head, pose.head, alpha);
-  track.scale = track.scale * (1 - alpha) + pose.scale * alpha;
-  track.bodyHeight = track.bodyHeight * (1 - alpha) + pose.bodyHeight * alpha;
-  track.width = track.width * (1 - alpha) + pose.width * alpha;
-  track.descriptor = blendArray(track.descriptor, pose.descriptor, 0.28);
-  track.quality = pose.quality;
-  track.landmarks = pose.landmarks;
-  track.lastSeen = now;
-  track.missingSince = null;
-}
-
 function blendPoint(a, b, alpha) {
   return { x: a.x * (1 - alpha) + b.x * alpha, y: a.y * (1 - alpha) + b.y * alpha };
+}
+
+function blendBox(a, b, alpha) {
+  return {
+    x: a.x * (1 - alpha) + b.x * alpha,
+    y: a.y * (1 - alpha) + b.y * alpha,
+    width: a.width * (1 - alpha) + b.width * alpha,
+    height: a.height * (1 - alpha) + b.height * alpha
+  };
 }
 
 function blendArray(a, b, alpha) {
@@ -590,107 +559,118 @@ function blendArray(a, b, alpha) {
   return a.map((value, index) => value * (1 - alpha) + b[index] * alpha);
 }
 
-function createTrack(pose, now) {
+function createTrack(candidate, now) {
   const track = {
     id: state.nextTrackId++,
-    center: { ...pose.center },
-    foot: { ...pose.foot },
-    head: { ...pose.head },
-    scale: pose.scale,
-    bodyHeight: pose.bodyHeight,
-    width: pose.width,
-    descriptor: [...pose.descriptor],
-    quality: pose.quality,
-    landmarks: pose.landmarks,
+    box: { ...candidate.box },
+    center: { ...candidate.center },
+    head: { ...candidate.head },
+    answerPoint: { ...candidate.answerPoint },
+    appearance: [...candidate.appearance],
+    score: candidate.score,
     velocity: { x: 0, y: 0 },
-    lastSeen: now,
-    missingSince: null
+    lastSeen: now
   };
   state.tracks.set(track.id, track);
   return track;
 }
 
-function trackMatchScore(track, pose, now, participantMode) {
-  const target = getDisplayRect();
-  const elapsed = Math.max(0, now - track.lastSeen);
-  const predictionHorizon = Math.min(elapsed, 700);
-  const predicted = {
-    x: track.center.x + track.velocity.x * predictionHorizon,
-    y: track.center.y + track.velocity.y * predictionHorizon
+function updateTrack(track, candidate, now) {
+  const dt = Math.max(16, now - track.lastSeen);
+  const measuredVelocity = {
+    x: (candidate.center.x - track.center.x) / dt,
+    y: (candidate.center.y - track.center.y) / dt
   };
-  const diagonal = Math.hypot(target.width, target.height);
-  const distance = distance2(predicted, pose.center);
-  const allowedDistance = participantMode
-    ? Math.min(diagonal * 0.4, Math.max(track.scale * 3.2, 130 + elapsed * 0.08))
-    : Math.min(diagonal * 0.3, Math.max(track.scale * 2.4, 110));
-  if (distance > allowedDistance) return -Infinity;
-
-  const scaleRatio = pose.scale / Math.max(1, track.scale);
-  if (scaleRatio < 0.42 || scaleRatio > 2.4) return -Infinity;
-  const bodyHeightRatio = pose.bodyHeight / Math.max(1, track.bodyHeight);
-  if (participantMode && (bodyHeightRatio < 0.48 || bodyHeightRatio > 2.1)) return -Infinity;
-
-  const referenceDescriptor = participantMode && state.participantProfile?.descriptor?.length
-    ? state.participantProfile.descriptor
-    : track.descriptor;
-  const shapeDistance = descriptorDistance(referenceDescriptor, pose.descriptor);
-  if (participantMode && shapeDistance > 0.68) return -Infinity;
-  if (!participantMode && shapeDistance > 1.0) return -Infinity;
-
-  const distanceScore = 1 - distance / allowedDistance;
-  const scaleScore = 1 - Math.min(1, Math.abs(Math.log(scaleRatio)));
-  const heightScore = 1 - Math.min(1, Math.abs(Math.log(bodyHeightRatio)));
-  const shapeScore = 1 - Math.min(1, shapeDistance / 0.68);
-  const qualityScore = Math.min(1, pose.quality);
-  return distanceScore * 4.2 + shapeScore * 2.4 + scaleScore * 1.2 + heightScore + qualityScore * 0.4;
+  const alpha = 0.62;
+  track.velocity = {
+    x: track.velocity.x * 0.55 + measuredVelocity.x * 0.45,
+    y: track.velocity.y * 0.55 + measuredVelocity.y * 0.45
+  };
+  track.box = blendBox(track.box, candidate.box, alpha);
+  track.center = blendPoint(track.center, candidate.center, alpha);
+  track.head = blendPoint(track.head, candidate.head, alpha);
+  track.answerPoint = blendPoint(track.answerPoint, candidate.answerPoint, alpha);
+  track.appearance = blendArray(track.appearance, candidate.appearance, 0.12);
+  track.score = candidate.score;
+  track.lastSeen = now;
 }
 
-function updateTracks(poses, now) {
-  const unmatched = new Set(poses.map((_, index) => index));
+function trackMatchScore(track, candidate, now, participantMode) {
+  const target = getDisplayRect();
+  const elapsed = Math.max(0, now - track.lastSeen);
+  const horizon = Math.min(elapsed, 800);
+  const predicted = {
+    x: track.center.x + track.velocity.x * horizon,
+    y: track.center.y + track.velocity.y * horizon
+  };
+  const diagonal = Math.hypot(target.width, target.height);
+  const centerDistance = distance(predicted, candidate.center);
+  const allowedDistance = participantMode
+    ? Math.min(diagonal * 0.48, Math.max(track.box.width * 2.8, 150 + elapsed * 0.1))
+    : Math.min(diagonal * 0.32, Math.max(track.box.width * 2.0, 120));
+  if (centerDistance > allowedDistance) return -Infinity;
+
+  const areaRatio = (candidate.box.width * candidate.box.height) / Math.max(1, track.box.width * track.box.height);
+  if (participantMode && (areaRatio < 0.18 || areaRatio > 5.5)) return -Infinity;
+  if (!participantMode && (areaRatio < 0.3 || areaRatio > 3.5)) return -Infinity;
+
+  const profileAppearance = participantMode && state.participantProfile?.appearance?.length
+    ? state.participantProfile.appearance
+    : track.appearance;
+  const colorDistance = appearanceDistance(profileAppearance, candidate.appearance);
+  if (participantMode && colorDistance > 0.42) return -Infinity;
+  if (!participantMode && colorDistance > 0.55) return -Infinity;
+
+  const distanceScore = 1 - centerDistance / allowedDistance;
+  const sizeScore = 1 - Math.min(1, Math.abs(Math.log(areaRatio)) / 1.6);
+  const colorScore = 1 - Math.min(1, colorDistance / 0.42);
+  const overlapScore = intersectionOverUnion(track.box, candidate.box);
+  return distanceScore * 3.4 + colorScore * 3.0 + overlapScore * 2.0 + sizeScore + candidate.score * 0.5;
+}
+
+function updateTracks(candidates, now) {
+  const unmatched = new Set(candidates.map((_, index) => index));
   const participant = state.participantTrackId ? state.tracks.get(state.participantTrackId) : null;
 
   if (participant) {
     let bestIndex = -1;
     let bestScore = -Infinity;
     for (const index of unmatched) {
-      const score = trackMatchScore(participant, poses[index], now, true);
+      const score = trackMatchScore(participant, candidates[index], now, true);
       if (score > bestScore) {
         bestScore = score;
         bestIndex = index;
       }
     }
-    if (bestIndex >= 0 && bestScore > 1.15) {
-      updateTrack(participant, poses[bestIndex], now);
+    if (bestIndex >= 0 && bestScore > 1.1) {
+      updateTrack(participant, candidates[bestIndex], now);
       unmatched.delete(bestIndex);
-    } else if (!participant.missingSince) {
-      participant.missingSince = now;
     }
   }
 
   const otherTracks = [...state.tracks.values()]
-    .filter((track) => track.id !== state.participantTrackId && now - track.lastSeen < 3000)
+    .filter((track) => track.id !== state.participantTrackId && now - track.lastSeen < 3200)
     .sort((a, b) => b.lastSeen - a.lastSeen);
 
   for (const track of otherTracks) {
     let bestIndex = -1;
     let bestScore = -Infinity;
     for (const index of unmatched) {
-      const score = trackMatchScore(track, poses[index], now, false);
+      const score = trackMatchScore(track, candidates[index], now, false);
       if (score > bestScore) {
         bestScore = score;
         bestIndex = index;
       }
     }
     if (bestIndex >= 0 && bestScore > 0.9) {
-      updateTrack(track, poses[bestIndex], now);
+      updateTrack(track, candidates[bestIndex], now);
       unmatched.delete(bestIndex);
     }
   }
 
-  for (const index of unmatched) createTrack(poses[index], now);
-
+  for (const index of unmatched) createTrack(candidates[index], now);
   for (const [id, track] of state.tracks) {
-    if (id !== state.participantTrackId && now - track.lastSeen > 3000) state.tracks.delete(id);
+    if (id !== state.participantTrackId && now - track.lastSeen > 3200) state.tracks.delete(id);
   }
 }
 
@@ -706,10 +686,10 @@ function clearTracking() {
 function zoneFromTrack(track) {
   if (!state.currentQuestion) return null;
   const target = getDisplayRect();
-  const answerAreaTop = target.height * 0.66;
-  if (track.foot.y < answerAreaTop || track.foot.x < 0 || track.foot.x > target.width) return null;
+  const x = track.answerPoint.x;
+  if (x < 0 || x > target.width) return null;
   const count = state.currentQuestion.choices.length;
-  return Math.min(count - 1, Math.floor((track.foot.x / target.width) * count));
+  return Math.min(count - 1, Math.floor((x / target.width) * count));
 }
 
 function updateParticipantAnswer(track, now) {
@@ -720,9 +700,7 @@ function updateParticipantAnswer(track, now) {
 
   if (zoneIndex === null) {
     state.zoneEnteredAt = 0;
-    elements.statusText.textContent = state.answerMode === "space"
-      ? "回答エリアへ移動してからスペースを押してください"
-      : "回答エリアへ移動してください";
+    elements.statusText.textContent = "参加者を画面内へ移動してください";
     updateChoiceClasses();
     return;
   }
@@ -730,7 +708,7 @@ function updateParticipantAnswer(track, now) {
   if (state.answerMode === "space") {
     elements.statusText.textContent = state.countdownActive
       ? `${state.currentQuestion.choices[zoneIndex]} を選択中`
-      : `${state.currentQuestion.choices[zoneIndex]} を選択中 — スペースで確定`;
+      : `${state.currentQuestion.choices[zoneIndex]} を選択中 — スペースで回答`;
     updateChoiceClasses();
     return;
   }
@@ -766,10 +744,19 @@ function submitAnswer(selectedIndex) {
   state.game.answeredCount += 1;
   updateScoreSummary();
   updateChoiceClasses(correct);
-  elements.statusText.textContent = correct ? "正解！" : "不正解";
   showMessage(correct ? `正解！ +${state.currentQuestionPoints}` : "残念！");
-  elements.nextButton.hidden = false;
 
+  if (state.answerMode === "space") {
+    state.awaitingNext = true;
+    elements.statusText.textContent = state.game.answeredCount >= state.game.questionCount
+      ? "スペースを押すと結果画面へ進みます"
+      : "スペースを押すと次の問題へ進みます";
+    elements.nextButton.hidden = true;
+    return;
+  }
+
+  elements.statusText.textContent = correct ? "正解！" : "不正解";
+  elements.nextButton.hidden = false;
   state.resultTimerId = setTimeout(() => {
     state.resultTimerId = null;
     if (state.answerLocked && state.phase === "quiz") showQuestion();
@@ -783,6 +770,7 @@ function showEndScreen() {
   hideMessage();
   state.phase = "end";
   state.answerLocked = true;
+  state.awaitingNext = false;
   elements.questionCard.hidden = true;
   elements.choiceLabels.hidden = true;
   elements.quizControls.hidden = true;
@@ -795,7 +783,7 @@ function showEndScreen() {
 
 function restartGame() {
   const participant = state.tracks.get(state.participantTrackId);
-  if (!participant || performance.now() - participant.lastSeen > 1800) {
+  if (!participant || performance.now() - participant.lastSeen > 2200) {
     elements.endScreen.hidden = true;
     beginParticipantSelection(false);
     return;
@@ -811,6 +799,7 @@ function returnToStart() {
   stopStream();
   clearTracking();
   state.currentQuestion = null;
+  state.awaitingNext = false;
   elements.questionCard.hidden = true;
   elements.choiceLabels.hidden = true;
   elements.quizControls.hidden = true;
@@ -821,7 +810,7 @@ function returnToStart() {
 function startSpaceCountdown() {
   if (state.answerMode !== "space" || state.phase !== "quiz" || state.answerLocked || state.countdownActive) return;
   const participant = state.tracks.get(state.participantTrackId);
-  if (!participant || performance.now() - participant.lastSeen > 1400) {
+  if (!participant || performance.now() - participant.lastSeen > 1600) {
     showMessage("参加者を追跡できていません");
     scheduleHideMessage(1000);
     return;
@@ -840,7 +829,7 @@ function startSpaceCountdown() {
       state.countdownActive = false;
       elements.countdown.hidden = true;
       if (state.currentZone === null) {
-        showMessage("回答エリアに参加者がいません");
+        showMessage("参加者を画面内で確認できません");
         scheduleHideMessage(1100);
       } else {
         submitAnswer(state.currentZone);
@@ -879,7 +868,7 @@ function hideMessage() {
 function drawParticipantSelection(now) {
   state.markerHitAreas = [];
   const tracks = [...state.tracks.values()]
-    .filter((track) => now - track.lastSeen < 1200 && track.quality >= 0.25)
+    .filter((track) => now - track.lastSeen < 1300 && track.score >= 0.3)
     .sort((a, b) => a.center.x - b.center.x);
 
   tracks.forEach((track, index) => {
@@ -887,7 +876,6 @@ function drawParticipantSelection(now) {
     const markerY = Math.max(38, track.head.y - 24);
     const selected = track.id === state.selectedCandidateId;
     const radius = selected ? 31 : 25;
-
     context.beginPath();
     context.arc(markerX, markerY, radius, 0, Math.PI * 2);
     context.fillStyle = selected ? "rgba(37, 99, 235, 0.97)" : "rgba(3, 7, 18, 0.9)";
@@ -904,7 +892,7 @@ function drawParticipantSelection(now) {
   });
 
   if (tracks.length === 0) {
-    elements.participantStatus.textContent = "姿勢が見つかりません。頭から足まで映る位置に立ってください。";
+    elements.participantStatus.textContent = "人物が見つかりません。上半身だけでも画面に入る位置へ移動してください。";
   } else if (state.selectedCandidateId === null) {
     elements.participantStatus.textContent = `${tracks.length}人を検出しました。参加者の丸い番号をクリックしてください。`;
   }
@@ -919,7 +907,6 @@ function drawParticipantLabel(track) {
   const height = 42;
   const x = Math.max(4, Math.min(target.width - width - 4, track.head.x - width / 2));
   const y = Math.max(5, track.head.y - height - 16);
-
   context.fillStyle = "rgba(3, 7, 18, 0.92)";
   context.beginPath();
   context.roundRect(x, y, width, height, 13);
@@ -933,7 +920,7 @@ function drawParticipantLabel(track) {
   context.fillText(text, x + width / 2, y + height / 2);
 
   context.beginPath();
-  context.arc(track.foot.x, Math.min(target.height - 10, track.foot.y), 8, 0, Math.PI * 2);
+  context.arc(track.answerPoint.x, Math.min(target.height - 10, track.answerPoint.y), 8, 0, Math.PI * 2);
   context.fillStyle = "#38bdf8";
   context.fill();
   context.strokeStyle = "#f8fafc";
@@ -945,56 +932,48 @@ function handleParticipantLost(now) {
   const track = state.tracks.get(state.participantTrackId);
   if (!track) return true;
   const missingFor = now - track.lastSeen;
-
-  if (missingFor > 1200 && state.phase === "quiz") {
+  if (missingFor > 1500 && state.phase === "quiz") {
     state.currentZone = null;
     state.zoneEnteredAt = 0;
     elements.statusText.textContent = "参加者を再取得しています…";
     updateChoiceClasses();
   }
-
-  if (missingFor > 4500 && state.phase === "quiz" && !state.lostPrompted) {
+  if (missingFor > 5200 && state.phase === "quiz" && !state.lostPrompted) {
     state.lostPrompted = true;
     showMessage("参加者を見失いました。再登録してください");
     scheduleHideMessage(1500);
     beginParticipantSelection(true);
   }
-  return missingFor > 1200;
+  return missingFor > 1500;
 }
 
 function drawScene(now) {
   const target = getDisplayRect();
   context.clearRect(0, 0, target.width, target.height);
-
   if (state.phase === "participant") {
     drawParticipantSelection(now);
     return;
   }
-
   if (state.phase !== "answer" && state.phase !== "quiz") return;
   const participant = state.tracks.get(state.participantTrackId);
   if (!participant || handleParticipantLost(now)) return;
-
   drawParticipantLabel(participant);
   if (state.phase === "quiz") updateParticipantAnswer(participant, now);
 }
 
-function processPoseResult(result, now) {
+function processDetectionResult(result, now) {
   const transform = getVideoTransform();
   if (!transform) return;
-  const landmarks = result?.landmarks ?? [];
-  const worldLandmarks = result?.worldLandmarks ?? [];
-  const poses = landmarks
-    .map((poseLandmarks, index) => poseFromLandmarks(poseLandmarks, worldLandmarks[index], transform))
+  const candidates = (result?.detections ?? [])
+    .map((detection) => detectionToCandidate(detection, transform))
     .filter(Boolean);
-  updateTracks(poses, now);
+  updateTracks(candidates, now);
 }
 
 function detectionLoop(now) {
   if (!state.running) return;
-
   if (
-    state.poseLandmarker &&
+    state.objectDetector &&
     elements.video.readyState >= 2 &&
     elements.video.currentTime !== state.lastVideoTime &&
     now - state.lastDetectionAt >= state.detectionIntervalMs
@@ -1002,13 +981,12 @@ function detectionLoop(now) {
     state.lastDetectionAt = now;
     state.lastVideoTime = elements.video.currentTime;
     try {
-      const result = state.poseLandmarker.detectForVideo(elements.video, now);
-      processPoseResult(result, performance.now());
+      const result = state.objectDetector.detectForVideo(elements.video, now);
+      processDetectionResult(result, performance.now());
     } catch (error) {
-      console.error("Pose detection error", error);
+      console.error("Object detection error", error);
     }
   }
-
   drawScene(performance.now());
   state.animationFrameId = requestAnimationFrame(detectionLoop);
 }
@@ -1020,7 +998,6 @@ function handleCanvasClick(event) {
   const y = event.clientY - rect.top;
   const hit = state.markerHitAreas.find((area) => Math.hypot(x - area.x, y - area.y) <= area.radius);
   if (!hit) return;
-
   state.selectedCandidateId = hit.trackId;
   elements.confirmParticipantButton.disabled = false;
   elements.participantStatus.textContent = "選択しました。問題なければ参加者を確定してください。";
@@ -1058,7 +1035,7 @@ function stopApp() {
   if (state.animationFrameId) cancelAnimationFrame(state.animationFrameId);
   cancelCountdown();
   stopStream();
-  state.poseLandmarker?.close?.();
+  state.objectDetector?.close?.();
 }
 
 elements.questionCountInput.addEventListener("input", validateGameSettings);
@@ -1080,7 +1057,9 @@ elements.backToCameraButton.addEventListener("click", () => {
 elements.backToParticipantButton.addEventListener("click", () => beginParticipantSelection(false));
 elements.startQuizButton.addEventListener("click", startQuiz);
 elements.reselectParticipantButton.addEventListener("click", () => beginParticipantSelection(true));
-elements.nextButton.addEventListener("click", showQuestion);
+elements.nextButton.addEventListener("click", () => {
+  if (state.answerMode !== "space") showQuestion();
+});
 elements.finishGameButton.addEventListener("click", showEndScreen);
 elements.restartButton.addEventListener("click", restartGame);
 elements.returnToStartButton.addEventListener("click", returnToStart);
@@ -1090,8 +1069,11 @@ window.addEventListener("keydown", (event) => {
   if (event.code !== "Space" || event.repeat) return;
   const target = event.target;
   if (target instanceof HTMLInputElement || target instanceof HTMLSelectElement || target instanceof HTMLButtonElement) return;
-  if (state.answerMode === "space" && state.phase === "quiz") {
-    event.preventDefault();
+  if (state.answerMode !== "space" || state.phase !== "quiz") return;
+  event.preventDefault();
+  if (state.answerLocked && state.awaitingNext) {
+    showQuestion();
+  } else if (!state.answerLocked) {
     startSpaceCountdown();
   }
 });
