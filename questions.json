@@ -1,9 +1,10 @@
 {
   "settings": {
-    "pointsPerCorrectAnswer": 100,
     "holdDurationMs": 1200,
     "resultDisplayMs": 1300,
-    "spaceCountdownSeconds": 3
+    "spaceCountdownSeconds": 3,
+    "defaultQuestionCount": 5,
+    "defaultMaxScore": 500
   },
   "questions": [
     { "id": "q1", "text": "日本の首都はどこ？", "choices": ["大阪", "東京", "福岡"], "correctIndex": 1 },
