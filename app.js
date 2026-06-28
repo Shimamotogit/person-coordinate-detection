@@ -463,7 +463,11 @@ function isVisible(landmark, threshold = 0.25) {
 
 function averagePoints(points) {
   if (points.length === 0) return { x: 0, y: 0 };
-  return points.reduce((sum, point) => ({ x: sum.x + point.x, y: sum.y + point.y }), { x: 0, y: 0 });
+  const total = points.reduce(
+    (sum, point) => ({ x: sum.x + point.x, y: sum.y + point.y }),
+    { x: 0, y: 0 }
+  );
+  return { x: total.x / points.length, y: total.y / points.length };
 }
 
 function distance2(a, b) {
