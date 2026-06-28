@@ -73,12 +73,12 @@
 
         <div id="participantStep" class="setup-step" hidden>
           <h1>参加者を登録</h1>
-          <p>画面上の丸い番号をクリックし、参加者を確定してください。矩形は表示しません。</p>
+          <p>画面上の丸い番号をクリックし、参加者を確定してください。全身が映っていなくても登録できます。</p>
           <div class="form-row">
             <button id="confirmParticipantButton" class="primary-button" type="button" disabled>この人を参加者に決定</button>
             <button id="backToCameraButton" class="secondary-button" type="button">カメラを選び直す</button>
           </div>
-          <p id="participantStatus" class="setup-status">姿勢を検出しています…</p>
+          <p id="participantStatus" class="setup-status">人物を検出しています…</p>
         </div>
 
         <div id="answerStep" class="setup-step" hidden>
@@ -89,7 +89,7 @@
           </label>
           <label class="mode-option">
             <input type="radio" name="answerMode" value="space" />
-            <span><strong>管理者がスペースで確定</strong><small>スペース押下後、3秒カウントダウン終了時の位置で確定します。</small></span>
+            <span><strong>管理者がスペースで確定</strong><small>スペース押下後、3秒カウントダウン終了時の位置で回答します。採点後、もう一度スペースを押すまで次の問題へ進みません。</small></span>
           </label>
           <label class="duration-field" for="holdDurationInput">
             時間確定までの秒数
@@ -127,7 +127,7 @@
     <aside id="helpPanel" class="help-panel">
       <h2>遊び方</h2>
       <p>開始画面で出題数と最大点を決め、カメラ・参加者・回答方法を設定します。</p>
-      <p>クイズ中は登録した1人だけをPose Landmarkerで追跡・採点します。全画面表示ではこの説明欄は表示されません。</p>
+      <p>クイズ中は登録した1人だけを高精度人物検出モデルで追跡・採点します。上半身だけでも動作します。</p>
       <p class="privacy-note">映像はブラウザ内だけで処理され、サーバーには送信しません。</p>
     </aside>
   </main>
