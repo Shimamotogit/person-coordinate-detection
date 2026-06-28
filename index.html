@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#0b1020" />
+  <title>Stand & Answer - Camera AI Quiz</title>
+  <link rel="stylesheet" href="styles.css" />
+  <script defer src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.3/dist/coco-ssd.min.js"></script>
+  <script defer src="app.js"></script>
+</head>
+<body>
+  <main class="app-shell">
+    <section class="stage" aria-label="カメラ映像と回答エリア">
+      <video id="camera" autoplay playsinline muted></video>
+      <canvas id="overlay"></canvas>
+
+      <header class="question-card" aria-live="polite">
+        <div class="question-meta">
+          <span id="questionCounter">0 / 0</span>
+          <span id="statusText">準備中</span>
+        </div>
+        <h1 id="questionText">カメラを開始してください</h1>
+      </header>
+
+      <div id="choiceLabels" class="choice-labels" aria-label="回答の選択肢"></div>
+
+      <div class="controls">
+        <button id="startButton" class="primary-button" type="button">カメラを開始</button>
+        <button id="nextButton" class="secondary-button" type="button" hidden>次の問題</button>
+        <button id="resetButton" class="secondary-button" type="button">スコアをリセット</button>
+      </div>
+
+      <div id="message" class="message" role="status" aria-live="assertive"></div>
+    </section>
+
+    <aside class="help-panel">
+      <h2>遊び方</h2>
+      <p>選択肢のエリアへ移動し、足元を約1.2秒止めると回答が確定します。</p>
+      <p>人物の頭上に現在のポイントが表示されます。</p>
+      <p class="privacy-note">映像はブラウザ内だけで処理され、サーバーには送信しません。</p>
+    </aside>
+  </main>
+</body>
+</html>
