@@ -1,0 +1,181 @@
+:root {
+  color-scheme: dark;
+  font-family: Inter, "Noto Sans JP", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background: #060914;
+  color: #f8fafc;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: radial-gradient(circle at top, #18213f 0%, #060914 55%);
+}
+
+button { font: inherit; }
+
+.app-shell {
+  width: min(1440px, 100%);
+  margin: 0 auto;
+  padding: 16px;
+}
+
+.stage {
+  position: relative;
+  overflow: hidden;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  min-height: 520px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 24px;
+  background: #111827;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.45);
+}
+
+#camera,
+#overlay {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+#camera {
+  opacity: 0.92;
+  transform: scaleX(-1);
+}
+
+#overlay { pointer-events: none; }
+
+.question-card {
+  position: absolute;
+  z-index: 2;
+  top: 18px;
+  left: 50%;
+  width: min(860px, calc(100% - 32px));
+  transform: translateX(-50%);
+  padding: 16px 22px 20px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 18px;
+  background: rgba(3, 7, 18, 0.78);
+  backdrop-filter: blur(14px);
+  text-align: center;
+}
+
+.question-card h1 {
+  margin: 8px 0 0;
+  font-size: clamp(1.2rem, 2.6vw, 2.3rem);
+  line-height: 1.35;
+}
+
+.question-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  color: #bfdbfe;
+  font-weight: 700;
+  font-size: 0.9rem;
+}
+
+.choice-labels {
+  position: absolute;
+  z-index: 2;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  display: grid;
+  align-items: end;
+  height: 34%;
+  pointer-events: none;
+}
+
+.choice-label {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  height: 100%;
+  padding: 18px 10px;
+  border-top: 3px solid rgba(255, 255, 255, 0.8);
+  border-right: 1px solid rgba(255, 255, 255, 0.5);
+  background: rgba(15, 23, 42, 0.36);
+  text-align: center;
+  font-size: clamp(1rem, 2.25vw, 2rem);
+  font-weight: 900;
+  text-shadow: 0 2px 8px #000;
+  transition: background 120ms ease, transform 120ms ease;
+}
+
+.choice-label:last-child { border-right: 0; }
+.choice-label.active {
+  background: rgba(37, 99, 235, 0.52);
+  box-shadow: inset 0 0 0 4px #f8fafc;
+}
+.choice-label.correct { background: rgba(22, 163, 74, 0.56); }
+.choice-label.wrong { background: rgba(220, 38, 38, 0.56); }
+
+.controls {
+  position: absolute;
+  z-index: 4;
+  right: 18px;
+  bottom: 18px;
+  display: flex;
+  gap: 10px;
+}
+
+.primary-button,
+.secondary-button {
+  min-height: 44px;
+  padding: 10px 16px;
+  border: 0;
+  border-radius: 12px;
+  cursor: pointer;
+  font-weight: 800;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.25);
+}
+
+.primary-button { background: #f8fafc; color: #0f172a; }
+.secondary-button { background: rgba(15, 23, 42, 0.84); color: #f8fafc; }
+button:disabled { cursor: wait; opacity: 0.65; }
+
+.message {
+  position: absolute;
+  z-index: 4;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  padding: 18px 28px;
+  border-radius: 16px;
+  background: rgba(3, 7, 18, 0.88);
+  font-size: clamp(1.25rem, 3vw, 2.5rem);
+  font-weight: 900;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 160ms ease;
+}
+
+.message.show { opacity: 1; }
+
+.help-panel {
+  margin: 16px 4px 0;
+  padding: 16px 20px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 16px;
+  background: rgba(15, 23, 42, 0.58);
+}
+
+.help-panel h2 { margin: 0 0 8px; }
+.help-panel p { margin: 5px 0; color: #cbd5e1; }
+.privacy-note { font-size: 0.9rem; }
+
+@media (max-width: 760px) {
+  .app-shell { padding: 0; }
+  .stage { min-height: 100dvh; border: 0; border-radius: 0; aspect-ratio: auto; }
+  .question-card { top: 8px; }
+  .choice-labels { height: 38%; }
+  .controls { right: 10px; bottom: 10px; left: 10px; flex-wrap: wrap; }
+  .controls button { flex: 1 1 auto; }
+  .help-panel { display: none; }
+}
